@@ -1,0 +1,20 @@
+#include <stdio.h>
+
+int main() {
+  
+  //Open file
+  FILE *file = fopen("life.txt", "r");
+  if (file == NULL) {
+    fprintf(stderr, "Can't open file\n");
+  }
+
+  char c;
+  while(!feof(file)) {
+    c = fgetc(file);
+    putchar(c);
+  }
+
+  
+  fclose(file);
+  return 0;
+}

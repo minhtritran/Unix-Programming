@@ -1,0 +1,16 @@
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
+
+extern char **environ;
+
+int main(int argc, char *argv[]) {
+  //Loop through arguments
+  for (int i = 0; argv[i] != NULL; i++) {
+    //Check if command is env
+    if (i == 0) {
+      if (strcmp("env", argv[i]) != 0)
+	printf("%s\n", argv[i]);
+    }
+  }
+}

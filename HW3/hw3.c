@@ -13,9 +13,16 @@ char** getCommandFromInputString(char* inputString, int* command_argc, size_t* a
 
 int main() {
 	while(1) {
+		//Set prompt string
+		char* prompt;
+		prompt = getenv("PS1");
+		if (prompt == NULL) {
+			prompt = "#> ";
+		}
+		printf("%s", prompt);
+
 		//Store shell input
 		char input_string[800];
-		printf("#> ");
 		if (fgets(input_string, 800, stdin) == NULL) {
 			perror("Bad input string");
 		}

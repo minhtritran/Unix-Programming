@@ -40,7 +40,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	getSizeDir(dirname, &hlink);
-
+	
+	free(hlink.inodes);
 	return 0;
 }
 

@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <errno.h>
 
 const int INPUT_BUFFER_SIZE = 1024;
 const int PATH_BUFFER_SIZE = 2048;
@@ -72,12 +73,31 @@ char* getInput(int argc, char** argv) {
 unsigned long getSizeDir(char* dirname, struct ULongArray* hlink) {
 	unsigned long total_blocks = 0;
 
-	DIR* dirp = opendir(dirname);
+	DIR* dirp;
+	if ((dirp = opendir(dirname)) == NULL) {
+		perror("Cannot open dir");
+		//If access denied, just print the directory's block size
+		if (errno == EACCES) {
+			struct stat statBuf;
+			lstat(dirname, &statBuf);
+			printf("%ld\t%s\n", statBuf.st_blocks/BLOCKSIZE_CONVERSION_RATIO, dirname);
+			return statBuf.st_blocks;
+		}
+		else {
+			exit(1);
+		}
+		
+	}
 	struct dirent* direntp;
 	//Loop through current directory
 	while ((direntp = readdir(dirp)) != NULL) {
 		char filename[PATH_BUFFER_SIZE];
-		snprintf(filename, PATH_BUFFER_SIZE, "%s/%s", dirname, direntp->d_name);
+		if (strcmp(dirname, "/") == 0) {
+			snprintf(filename, PATH_BUFFER_SIZE, "/%s", direntp->d_name);
+		}
+		else {
+			snprintf(filename, PATH_BUFFER_SIZE, "%s/%s", dirname, direntp->d_name);	
+		}
 		if (strcmp(direntp->d_name, "..") != 0) {
 			struct stat statBuf;
 			lstat(filename, &statBuf);
@@ -103,6 +123,12 @@ unsigned long getSizeDir(char* dirname, struct ULongArray* hlink) {
 			}
 		}
 	}
+
+	if (closedir(dirp) == -1) {
+		perror("closedir failed");
+		exit(1);
+	}
+
 	//Convert number of 512 blocks to number of 1024 blocks and print
 	printf("%ld\t%s\n", total_blocks/BLOCKSIZE_CONVERSION_RATIO, dirname);
 

@@ -232,6 +232,7 @@ void fillCommand(command* cmd) {
 	
 }
 
+//Add the given argument to the given command
 void addArgToArray(char* arg, command* cmd) {
 	//add token to array
 	((*cmd).argv)[((*cmd).argc)] = malloc(strlen(arg) * sizeof(char));
@@ -455,6 +456,7 @@ void free2DCharArray(char** array, size_t argc) {
 	free(array);
 }
 
+//Check whether the given file exists or not
 bool fileExists(char* filename) {
     struct stat st;
     int result = stat(filename, &st);

@@ -34,15 +34,15 @@ int main(int argc, char *argv[]) {
 	int sock_fd = connectToServer(server_ip, server_port);
 	printf("Connection established. Start chatting!\n");
 
-	while (1) {
-		//select
-		fd_set set;
-		FD_ZERO(&set);
-		int max_fd = sock_fd + 1;
-		struct timeval timeout;
-		timeout.tv_sec = TIMEOUT_SECS;
-		timeout.tv_usec = 0;
+	//date for select
+	fd_set set;
+	FD_ZERO(&set);
+	int max_fd = sock_fd + 1;
+	struct timeval timeout;
+	timeout.tv_sec = TIMEOUT_SECS;
+	timeout.tv_usec = 0;
 
+	while (1) {
 		FD_SET(STDIN_FILENO, &set);
 		FD_SET(sock_fd, &set);
 		if (select(max_fd, &set, NULL, NULL, &timeout) == -1) {

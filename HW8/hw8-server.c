@@ -40,6 +40,10 @@ struct ChatSystem {
 	struct User users[MAX_USERS];
 	int num_users;
 	struct Queue msg_queue;
+	pthread_mutex_t users_lock;
+	pthread_mutex_t msg_queue_lock;
+	pthread_cond_t msq_queue_cond_c;
+	pthread_cond_t msq_queue_cond_p;
 };
 
 void handleInput(int argc, char* argv[], char** server_name, int* server_port);
@@ -47,11 +51,12 @@ int setUpServer(int server_port);
 bool handleOutgoingMsg(int sock_fd, char* msg_buf, char* server_name);
 bool handleIncomingMsg(int sock_fd, char* msg_buf);
 
-bool insert(struct Queue* msg_queue, char* message);
-char* pop(struct Queue* msg_queue);
+bool insertMessage(struct ChatSystem* chat, char* message);
+char* popMessage(struct ChatSystem* chat);
 
 void* adder_thread(void* p);
 void* user_thread(void* p);
+void* broadcaster_thread(void* p);
 
 int main(int argc, char *argv[]) {
 	char* server_name;
@@ -65,12 +70,23 @@ int main(int argc, char *argv[]) {
 	chat.msg_queue.front = 0;
 	chat.msg_queue.back = 0;
 	chat.msg_queue.num_items = 0;
+	chat.users_lock = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+	chat.msg_queue_lock = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+	chat.msq_queue_cond_c = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+	chat.msq_queue_cond_p = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 
 	pthread_t adder_tid;
 	pthread_create(&adder_tid, NULL, adder_thread, (void*)&chat);
+
+	pthread_t broadcaster_tid;
+	pthread_create(&broadcaster_tid, NULL, broadcaster_thread, (void*)&chat);
+
 	printf("Waiting for client connection..\n");
 
 	pthread_join(adder_tid, NULL);
+	pthread_join(broadcaster_tid, NULL);
+	pthread_mutex_destroy(&chat.users_lock);
+	pthread_mutex_destroy(&chat.msg_queue_lock);
 
 	return 0;
 }
@@ -176,46 +192,69 @@ bool handleIncomingMsg(int sock_fd, char* msg_buf) {
 	return true;
 }
 
-bool insert(struct Queue* msg_queue, char* message) {
+bool insertMessage(struct ChatSystem* chat, char* message) {
+	pthread_mutex_lock(&(*chat).msg_queue_lock);
+	while((*chat).msg_queue.num_items == BUFFER_SIZE) {
+		pthread_cond_wait(&(*chat).msq_queue_cond_p, &(*chat).msg_queue_lock);
+	}
+
 	//check to see if queue is full
-	if ((*msg_queue).num_items > BUFFER_SIZE) {
+	if ((*chat).msg_queue.num_items > BUFFER_SIZE) {
 		return false;
 	}
 
 	//If front is past the end of the array, set it back to the beginning
-	if ((*msg_queue).front >= BUFFER_SIZE) {
-		(*msg_queue).front = 0;
+	if ((*chat).msg_queue.front >= BUFFER_SIZE) {
+		(*chat).msg_queue.front = 0;
 	}
 
 	char buf[BUFFER_SIZE];
-	(*msg_queue).items[(*msg_queue).front] = buf;
-	strcpy((*msg_queue).items[(*msg_queue).front], message);
+	(*chat).msg_queue.items[(*chat).msg_queue.front] = buf;
+	strcpy((*chat).msg_queue.items[(*chat).msg_queue.front], message);
 	
-	(*msg_queue).front++;
-	(*msg_queue).num_items++;
+	(*chat).msg_queue.front++;
+	(*chat).msg_queue.num_items++;
+
+	pthread_cond_signal(&(*chat).msq_queue_cond_c);
+	pthread_mutex_unlock(&(*chat).msg_queue_lock);
 
 	return true;
 }
 
-char* pop(struct Queue* msg_queue) {
-	if ((*msg_queue).num_items == 0) {
+char* popMessage(struct ChatSystem* chat) {
+	pthread_mutex_lock(&(*chat).msg_queue_lock);
+	while((*chat).msg_queue.num_items == 0) {
+		pthread_cond_wait(&(*chat).msq_queue_cond_c, &(*chat).msg_queue_lock);
+	}
+
+	if ((*chat).msg_queue.num_items == 0) {
 		return NULL;
 	}
 
 	//If back is past the end of the array, set it back to the beginning
-	if ((*msg_queue).back >= BUFFER_SIZE) {
-		(*msg_queue).back = 0;
+	if ((*chat).msg_queue.back >= BUFFER_SIZE) {
+		(*chat).msg_queue.back = 0;
 	}
 
-	(*msg_queue).back++;
-	(*msg_queue).num_items--;
-	return (*msg_queue).items[(*msg_queue).back - 1];
+	(*chat).msg_queue.back++;
+	(*chat).msg_queue.num_items--;
+
+	char* message = malloc(sizeof(char) * BUFFER_SIZE);
+	if (message == NULL) {
+		perror("message malloc failed");
+		exit(1);
+	}
+	strcpy(message, (*chat).msg_queue.items[(*chat).msg_queue.back - 1]);
+
+	pthread_cond_signal(&(*chat).msq_queue_cond_p);
+	pthread_mutex_unlock(&(*chat).msg_queue_lock);
+
+	return message;
 }
 
 void* adder_thread(void* p) {
 	struct ChatSystem* chat = (struct ChatSystem *)p;
 	while (1) {
-		//accept
 		int sock_fd = accept((*chat).server_fd, (struct sockaddr *) NULL, NULL);
 		
 		//create user and fill it with the user name and associated fd
@@ -227,12 +266,17 @@ void* adder_thread(void* p) {
 		}
 		user.fd = sock_fd;
 
+		char signin_msg[BUFFER_SIZE];
+		snprintf(signin_msg, BUFFER_SIZE, "%s has signed in.\n", user.name);
+		insertMessage(chat, signin_msg);
+
+		//update users array with new user and create corresponding user thread
+		pthread_mutex_lock(&(*chat).users_lock);
 		(*chat).users[(*chat).num_users] = user;
-
 		pthread_create(&(*chat).users[(*chat).num_users].tid, NULL, user_thread, (void*)chat);
-		(*chat).num_users++;
+		pthread_mutex_unlock(&(*chat).users_lock);
 
-		printf("Connection established. Start chatting!\n");
+		(*chat).num_users++;
 	}
 
 	return NULL;
@@ -241,28 +285,48 @@ void* adder_thread(void* p) {
 void* user_thread(void* p) {
 	struct ChatSystem* chat = (struct ChatSystem *)p;
 	
+	//get this thread's user index
 	pthread_t self = pthread_self();
-
 	size_t user_index = -1;
+	pthread_mutex_lock(&(*chat).users_lock);
 	for (size_t i = 0; i < (*chat).num_users; i++) {
 		if ((*chat).users[i].tid == self) {
 			user_index = i;
 		}
 	}
+	pthread_mutex_unlock(&(*chat).users_lock);
 
 	if (user_index == -1) {
 		printf("%s\n", "No such user");
 	}
 
-	char signin_msg[BUFFER_SIZE];
-	snprintf(signin_msg, BUFFER_SIZE, "%s has signed in.", (*chat).users[user_index].name);
-	
-	insert(&(*chat).msg_queue, signin_msg);
-	printf("%s\n", (*chat).msg_queue.items[0]);
+	while(1) {
+		char msg_buf[BUFFER_SIZE];
+		memset(&msg_buf, 0, sizeof(msg_buf));
+		int n = read((*chat).users[user_index].fd, msg_buf, BUFFER_SIZE);
+		if (n == -1) {
+			perror("read failed");
+			exit(1);
+		}
+		if (strcmp(msg_buf, "quit\n") == 0) {
+			printf("%s\n", "user qutting");
+			break;
+		}
+
+		insertMessage(chat, msg_buf);
+	}
+
+	return NULL;
+}
+
+void* broadcaster_thread(void* p) {
+	struct ChatSystem* chat = (struct ChatSystem *)p;
 
 	while(1) {
-		sleep(1);
-		printf("%s\n", (*chat).users[user_index].name);
+		//broadcast message
+		char* message = popMessage(chat);
+		printf("%s", message);
+		free(message);
 	}
 
 	return NULL;

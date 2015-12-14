@@ -1,0 +1,10 @@
+Make
+Run the server program
+- Usage: server [port]
+Run the client program
+- Usage: client name ip port
+- Type quit to log off as user
+
+Notes:
+- I modified the client program from hw7 to send their name to the server at the very beginning.
+- In class, you suggested us to use lpthread when compiling, but it did not work in my system (Ubuntu).  Instead, I used pthread.

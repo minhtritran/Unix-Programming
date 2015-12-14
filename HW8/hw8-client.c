@@ -172,17 +172,18 @@ bool handleOutgoingMsg(int sock_fd, char* msg_buf, char* client_name) {
 //Returns false if server sends a 'quit' message, true otherwise
 bool handleIncomingMsg(int sock_fd, char* msg_buf) {
 	int n = read(sock_fd, msg_buf, BUFFER_SIZE);
-
+	if (n == -1) {
+		perror("read failed");
+		exit(1);
+	}
+		
 	//handle server quitting
 	if (strcmp(msg_buf, "quit\n") == 0) {
 		close(sock_fd);
 		return false;
 	}
 
-	if (write(STDOUT_FILENO, msg_buf, n) == -1) {
-		perror("write failed");
-		exit(1);
-	}
+	printf("%s", msg_buf);
 
 	return true;
 }
